@@ -60,8 +60,24 @@ kbd { font: 500 11px var(--mono); color: var(--muted); border: 1px solid var(--l
 .pad { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px)); display: none; justify-content: space-between; align-items: flex-end; gap: 12px; pointer-events: none; }
 .pad > * { pointer-events: auto; }
 .pad .grp { display: grid; gap: 8px; }
-.pad .rot { grid-template-columns: repeat(3, 56px); }
-.pad .cam { grid-template-columns: repeat(3, 48px); }
+.pad .rot { grid-template-columns: repeat(3, minmax(46px, 56px)); }
+.pad .cam { grid-template-columns: repeat(3, 1fr); }
+.pad .cam button { height: 44px; }
+.pad .left { display: flex; flex-direction: column; gap: 8px; width: min(172px, 44vw); }
+.touchpad { position: relative; height: 120px; border-radius: 12px; border: 1px solid var(--line); touch-action: none; overflow: hidden;
+  background-color: color-mix(in srgb, var(--panel) 90%, transparent);
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 26px 26px; background-position: center; }
+.touchpad.active { border-color: var(--accent); }
+.tp-arrow { position: absolute; font-size: 10px; color: var(--muted); }
+.tp-arrow.up { top: 4px; left: 50%; transform: translateX(-50%); }
+.tp-arrow.down { bottom: 4px; left: 50%; transform: translateX(-50%); }
+.tp-arrow.left { left: 6px; top: 50%; transform: translateY(-50%); }
+.tp-arrow.right { right: 6px; top: 50%; transform: translateY(-50%); }
+.tp-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+.touchpad .dot { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 45%, transparent); border: 2px solid var(--accent); opacity: 0; pointer-events: none; }
+.touchpad.active .dot { opacity: 1; }
+.touchpad.active .tp-label { opacity: 0; }
 .pad button { height: 52px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 90%, transparent); color: var(--text); font: 600 20px var(--body); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; touch-action: manipulation; }
 .pad button small { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
 .pad button:active { background: var(--line); }
@@ -160,10 +176,17 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 </div>
 
 <div class="pad" id="pad">
-  <div class="grp cam">
-    <button data-act="camL" aria-label="Caméra gauche">⟲<small>cam</small></button>
-    <button data-act="top" aria-label="Vue de dessus">⊙<small>dessus</small></button>
-    <button data-act="camR" aria-label="Caméra droite">⟳<small>cam</small></button>
+  <div class="left">
+    <div class="grp cam">
+      <button data-act="camL" aria-label="Caméra gauche">⟲<small>cam</small></button>
+      <button data-act="top" aria-label="Vue de dessus">⊙<small>dessus</small></button>
+      <button data-act="camR" aria-label="Caméra droite">⟳<small>cam</small></button>
+    </div>
+    <div class="touchpad" id="touchpad" aria-label="Pavé tactile : glisser pour déplacer la pièce">
+      <span class="tp-arrow up">▲</span><span class="tp-arrow down">▼</span><span class="tp-arrow left">◀</span><span class="tp-arrow right">▶</span>
+      <span class="tp-label">déplacer</span>
+      <span class="dot" id="tpDot"></span>
+    </div>
   </div>
   <div class="grp rot">
     <button data-act="rollL" aria-label="Rouler à gauche">⤺<small>rouler</small></button>
@@ -186,7 +209,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <li>Les déplacements suivent la caméra : « haut » éloigne toujours la pièce de toi.</li>
       <li>Chaque étage a sa couleur, pour lire la profondeur.</li>
       <li>Le curseur de coupe masque les étages du haut pour voir les trous.</li>
-      <li class="touch">Sur écran tactile : glisser un doigt déplace la pièce, deux doigts tournent la caméra.</li>
+      <li class="touch">Sur écran tactile : le pavé en bas à gauche déplace la pièce ; glisser sur le puits tourne la caméra, pincer zoome.</li>
     </ul>
     <button class="go" id="go">JOUER</button>
   </div>
@@ -710,44 +733,62 @@ document.querySelectorAll('#pad button').forEach(b => {
   b.addEventListener('pointerdown', e => { e.preventDefault(); if (started && !over) act(b.dataset.act); });
 });
 
-// Pointeurs : souris = orbite ; 1 doigt = déplacer la pièce ; 2 doigts = orbite + pincement
+// Écran : 1 doigt ou souris = tourner la caméra ; 2 doigts = tourner + pincer pour zoomer
 const pts = new Map();
-let swipe = null, pinch = null;
 const cv = renderer.domElement;
+function orbit(dx, dy) {
+  cam.yawT -= dx * 0.008; cam.yaw = cam.yawT;
+  cam.elevT = Math.max(0.15, Math.min(TOP_ELEV, cam.elevT + dy * 0.006)); cam.elev = cam.elevT;
+  cam.top = cam.elevT > 1.3;
+  updateQuadrant();
+}
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (e.pointerType === 'touch' && pts.size === 1) swipe = { x: e.clientX, y: e.clientY };
-  if (pts.size === 2) { swipe = null; pinch = null; }
 });
 cv.addEventListener('pointermove', e => {
   const p = pts.get(e.pointerId); if (!p) return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
-  if (e.pointerType !== 'touch') {
-    cam.yawT -= dx * 0.008; cam.yaw = cam.yawT;
-    cam.elevT = Math.max(0.15, Math.min(TOP_ELEV, cam.elevT + dy * 0.006)); cam.elev = cam.elevT;
-    cam.top = cam.elevT > 1.3;
-    updateQuadrant();
-  } else if (pts.size === 1 && swipe) {
-    const step = 30;
-    const sx = e.clientX - swipe.x, sy = e.clientY - swipe.y;
-    if (Math.abs(sx) >= step && Math.abs(sx) >= Math.abs(sy)) { act(sx > 0 ? 'right' : 'left'); swipe = { x: e.clientX, y: e.clientY }; }
-    else if (Math.abs(sy) >= step) { act(sy < 0 ? 'fwd' : 'back'); swipe = { x: e.clientX, y: e.clientY }; }
-  } else if (pts.size === 2) {
+  if (pts.size === 1) orbit(dx, dy);
+  else if (pts.size === 2) {
     const [a, b] = [...pts.values()];
     const other = a === p ? b : a;
     const d0 = Math.hypot(p.x - other.x, p.y - other.y), d1 = Math.hypot(e.clientX - other.x, e.clientY - other.y);
     cam.zoom = Math.max(0.6, Math.min(1.8, cam.zoom * (d0 / Math.max(1, d1))));
-    cam.yawT -= dx * 0.5 * 0.01; cam.yaw = cam.yawT;
-    cam.elevT = Math.max(0.15, Math.min(TOP_ELEV, cam.elevT + dy * 0.5 * 0.008)); cam.elev = cam.elevT;
-    cam.top = cam.elevT > 1.3;
-    updateQuadrant();
+    orbit(dx * 0.5, dy * 0.5);
   }
   p.x = e.clientX; p.y = e.clientY;
 });
-const endPtr = e => { pts.delete(e.pointerId); if (pts.size === 0) swipe = null; };
+const endPtr = e => pts.delete(e.pointerId);
 cv.addEventListener('pointerup', endPtr);
 cv.addEventListener('pointercancel', endPtr);
+
+// Pavé tactile : glisser déplace la pièce d'une case tous les 26 px, « haut » = s'éloigner de la caméra
+const tp = $('touchpad'), tpDot = $('tpDot');
+let tpAnchor = null;
+const placeDot = e => {
+  const r = tp.getBoundingClientRect();
+  tpDot.style.transform = `translate(${e.clientX - r.left}px, ${e.clientY - r.top}px)`;
+};
+tp.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  tp.setPointerCapture(e.pointerId);
+  tpAnchor = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  tp.classList.add('active'); placeDot(e);
+});
+tp.addEventListener('pointermove', e => {
+  if (!tpAnchor || e.pointerId !== tpAnchor.id) return;
+  placeDot(e);
+  if (!started || over) return;
+  const step = 26;
+  const sx = e.clientX - tpAnchor.x, sy = e.clientY - tpAnchor.y;
+  if (Math.abs(sx) >= step && Math.abs(sx) >= Math.abs(sy)) { act(sx > 0 ? 'right' : 'left'); tpAnchor.x += Math.sign(sx) * step; tpAnchor.y = e.clientY; pulse(); }
+  else if (Math.abs(sy) >= step) { act(sy < 0 ? 'fwd' : 'back'); tpAnchor.y += Math.sign(sy) * step; tpAnchor.x = e.clientX; pulse(); }
+});
+const tpEnd = e => { if (tpAnchor && e.pointerId === tpAnchor.id) { tpAnchor = null; tp.classList.remove('active'); } };
+tp.addEventListener('pointerup', tpEnd);
+tp.addEventListener('pointercancel', tpEnd);
+function pulse() { try { navigator.vibrate?.(8); } catch {} }
 cv.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = Math.max(0.6, Math.min(1.8, cam.zoom * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
 
 // Options

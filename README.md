@@ -20,4 +20,4 @@ Ouvrir `index.html` dans un navigateur (PC ou mobile). Three.js est chargé depu
 | PgUp / PgDn | mode coupe (masque les étages du haut) |
 | G X F H N M | aides : fantôme, rayons X, faisceau, trous, flèches, carte |
 
-Sur mobile : glisser un doigt pour déplacer, deux doigts pour la caméra, boutons pour les rotations.
+Sur mobile : le pavé tactile en bas à gauche déplace la pièce, glisser ailleurs sur l'écran tourne la caméra (pincer pour zoomer), boutons pour les rotations.
